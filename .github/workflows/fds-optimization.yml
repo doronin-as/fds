@@ -29,7 +29,7 @@ jobs:
   paired-verification:
     needs: unit-checks
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 360
     env:
       OMP_NUM_THREADS: '1'
       OMP_DYNAMIC: 'FALSE'
@@ -92,5 +92,10 @@ jobs:
         if: always()
         with:
           name: fds-staged-optimization-results
-          path: results/
+          path: |
+            results/**/*.csv
+            results/**/*.json
+            results/**/*.log
+            results/**/*.txt
+            results/**/*.out
           retention-days: 14

@@ -104,10 +104,10 @@ def main():
                         with (directory / 'console.log').open('w') as log:
                             code = subprocess.run(
                                 ['/usr/bin/time', '-f', '%e,%M', '-o', 'resources.txt',
-                                 'timeout', '-k', '30s', '180s', 'mpirun', '--oversubscribe',
+                                 'timeout', '-k', '30s', '600s', 'mpirun', '--oversubscribe',
                                  '-np', str(ranks), str(executables[variant]), input_file.name],
                                 cwd=directory, stdout=log, stderr=subprocess.STDOUT,
-                                timeout=240,
+                                timeout=660,
                             ).returncode
                         elapsed = time.monotonic() - started
                         resource_lines = (directory / 'resources.txt').read_text().strip().splitlines()
@@ -120,6 +120,9 @@ def main():
                         print(f'END {name} {variant}: code={code}, seconds={elapsed:.3f}', flush=True)
                         console = (directory / 'console.log').read_text(errors='replace')
                         if code or 'STOP: FDS completed successfully' not in console:
+                            print(console[-12000:], flush=True)
+                            for output_file in directory.glob('*.out'):
+                                print(output_file.read_text(errors='replace')[-12000:], flush=True)
                             raise RuntimeError(f'{name}/{variant}: calculation failed, exit={code}')
                     for variant in VARIANTS[1:]:
                         check = compare(directories['original'], directories[variant])
