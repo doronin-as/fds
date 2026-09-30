@@ -47,12 +47,12 @@ def compare(reference, candidate):
                         raise AssertionError(f'{name}:{row_index}:{column}: {x} != {y}')
                     fields += 1
     # Runtime/date/version text differs; compare convergence diagnostics separately.
-    pattern = re.compile(r'Maximum.*Error|Time Step Size|Pressure Iterations', re.I)
+    pattern = re.compile(r'Maximum.*Error|(?:Scaled )?Step Size:|Pressure Iterations', re.I)
     def diagnostics(directory):
         return {p.name: [line.strip() for line in p.read_text(errors='replace').splitlines()
                          if pattern.search(line)] for p in directory.glob('*.out')}
     a, b = diagnostics(reference), diagnostics(candidate)
-    if not a or a != b:
+    if not a or any(not lines for lines in a.values()) or a != b:
         raise AssertionError('Convergence/time-step diagnostics differ')
     # Binary field data provide an additional check beyond device CSV values.
     binary_count = 0
