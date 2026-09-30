@@ -4,6 +4,9 @@ on:
     branches: [codex/fds-performance]
     paths: [.github/workflows/fds-performance.yml, Source/**]
   workflow_dispatch:
+concurrency:
+  group: fds-performance
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -27,6 +30,13 @@ jobs:
           components: |
             mkl@2025.1.0
           prune: false
+      - name: Fetch required solver libraries
+        run: |
+          git clone --depth 1 https://github.com/hypre-space/hypre.git hypre
+          git -C hypre fetch --depth 1 origin tag v3.0.0
+          mkdir -p hypre/build
+          git clone --depth 1 https://github.com/LLNL/sundials.git sundials
+          git -C sundials fetch --depth 1 origin tag v7.5.0
       - name: Record environment
         run: |
           mkdir -p results
@@ -39,7 +49,13 @@ jobs:
           export FIREMODELS="$GITHUB_WORKSPACE"
           cd fds/Build/ompi_gnu_linux
           set -o pipefail
+          set +e
           ./make_fds.sh 2>&1 | tee "$GITHUB_WORKSPACE/results/build.log"
+          code=${PIPESTATUS[0]}
+          set -e
+          test "$code" -eq 0
+          test -f "$FIREMODELS/libs/hypre/v3.0.0/lib/libHYPRE.a"
+          test -f "$FIREMODELS/libs/sundials/v7.5.0/lib/libsundials_cvode.a"
           test -x fds_ompi_gnu_linux
       - name: Run Verification sample with repeated measurements
         shell: bash
