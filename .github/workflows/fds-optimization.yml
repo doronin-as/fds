@@ -1,0 +1,101 @@
+name: FDS staged optimization checks
+on:
+  push:
+    branches: [codex/fds-optimization]
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact revision selected by the calling workflow
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: fds-staged-optimization
+  cancel-in-progress: true
+jobs:
+  unit-checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - run: sudo apt-get update && sudo apt-get install -y gfortran libopenmpi-dev openmpi-bin
+      - run: python3 Utilities/Scripts/test_dump_timers.py
+      - run: python3 Utilities/Scripts/test_radiation_package_angles.py
+      - run: python3 -m unittest discover -s .github/security -p 'test_*.py' -v
+  paired-verification:
+    needs: unit-checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      OMP_NUM_THREADS: '1'
+      OMP_DYNAMIC: 'FALSE'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: fds
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - name: Prepare pinned comparison revisions
+        run: |
+          git -C fds fetch --depth 1 origin 68d163c5679e5b4e46e70b68171379f2db2b8ebc 80dba73566503571dda919b6c04ef85299d16ca3 58732c4431ee90469f32685c444ce3c144517f3e
+          git -C fds worktree add --detach ../original 68d163c5679e5b4e46e70b68171379f2db2b8ebc
+          git -C fds worktree add --detach ../timers 80dba73566503571dda919b6c04ef85299d16ca3
+          git -C fds worktree add --detach ../angles 58732c4431ee90469f32685c444ce3c144517f3e
+      - run: sudo apt-get update && sudo apt-get install -y gfortran gcc g++ make cmake libopenmpi-dev openmpi-bin
+      - uses: marcfehling/setup-oneapi@v0
+        with:
+          components: |
+            mkl@2025.1.0
+          prune: false
+      - name: Fetch solver libraries
+        run: |
+          git clone --depth 1 https://github.com/hypre-space/hypre.git hypre
+          git -C hypre fetch --depth 1 origin tag v3.0.0
+          mkdir -p hypre/build
+          git clone --depth 1 https://github.com/LLNL/sundials.git sundials
+          git -C sundials fetch --depth 1 origin tag v7.5.0
+      - name: Build all four stages with identical tools and libraries
+        shell: bash
+        run: |
+          mkdir -p results
+          source /opt/intel/oneapi/setvars.sh
+          export FIREMODELS="$GITHUB_WORKSPACE"
+          { uname -a; lscpu; gfortran --version; mpirun --version; } > results/environment.txt
+          for variant in original timers angles fds; do
+            git -C "$variant" rev-parse HEAD >> results/commits.txt
+          done
+          cd fds/Build/ompi_gnu_linux
+          set +e
+          ./make_fds.sh 2>&1 | tee "$GITHUB_WORKSPACE/results/build-optimized.log"
+          code=${PIPESTATUS[0]}
+          set -e
+          test "$code" -eq 0
+          export HYPRE_HOME="$FIREMODELS/libs/hypre/v3.0.0"
+          export SUNDIALS_HOME="$FIREMODELS/libs/sundials/v7.5.0"
+          test -f "$HYPRE_HOME/lib/libHYPRE.a"
+          test -f "$SUNDIALS_HOME/lib/libsundials_cvode.a"
+          for variant in original timers angles; do
+            cd "$GITHUB_WORKSPACE/$variant/Build/ompi_gnu_linux"
+            make -j4 COMP_FC=mpifort VPATH=../../Source -f ../makefile ompi_gnu_linux 2>&1 | tee "$GITHUB_WORKSPACE/results/build-$variant.log"
+            test -x fds_ompi_gnu_linux
+          done
+      - name: Compare unchanged Verification inputs and convergence results
+        shell: bash
+        run: |
+          source /opt/intel/oneapi/setvars.sh
+          python3 fds/Utilities/Scripts/compare_fds_variants.py --workspace "$GITHUB_WORKSPACE" --results "$GITHUB_WORKSPACE/results" --repeats 5
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fds-staged-optimization-results
+          path: |
+            results/**/*.csv
+            results/**/*.json
+            results/**/*.log
+            results/**/*.txt
+            results/**/*.out
+          retention-days: 14

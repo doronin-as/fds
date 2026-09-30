@@ -4,6 +4,12 @@ on:
     branches: [codex/fds-performance]
     paths: [.github/workflows/fds-performance.yml, Source/**]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact revision selected by the calling workflow
+        required: true
+        type: string
 concurrency:
   group: fds-performance
   cancel-in-progress: true
@@ -20,6 +26,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: fds
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
       - name: Install build tools
         run: |
