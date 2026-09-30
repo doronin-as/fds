@@ -3,6 +3,12 @@ on:
   push:
     branches: [codex/fds-timers]
     paths: [Source/main.f90, Utilities/Scripts/test_dump_timers.py, .github/workflows/fds-timers.yml]
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact revision selected by the calling workflow
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
@@ -12,6 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
       - name: Install GNU Fortran and Open MPI
         run: |

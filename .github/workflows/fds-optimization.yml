@@ -2,6 +2,12 @@ name: FDS staged optimization checks
 on:
   push:
     branches: [codex/fds-optimization]
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact revision selected by the calling workflow
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -14,10 +20,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
       - run: sudo apt-get update && sudo apt-get install -y gfortran libopenmpi-dev openmpi-bin
       - run: python3 Utilities/Scripts/test_dump_timers.py
       - run: python3 Utilities/Scripts/test_radiation_package_angles.py
+      - run: python3 -m unittest discover -s .github/security -p 'test_*.py' -v
   paired-verification:
     needs: unit-checks
     runs-on: ubuntu-24.04
@@ -29,22 +37,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: fds
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          path: original
-          ref: 68d163c5679e5b4e46e70b68171379f2db2b8ebc
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          path: timers
-          ref: 80dba73566503571dda919b6c04ef85299d16ca3
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          path: angles
-          ref: 58732c4431ee90469f32685c444ce3c144517f3e
-          persist-credentials: false
+      - name: Prepare pinned comparison revisions
+        run: |
+          git -C fds fetch --depth 1 origin 68d163c5679e5b4e46e70b68171379f2db2b8ebc 80dba73566503571dda919b6c04ef85299d16ca3 58732c4431ee90469f32685c444ce3c144517f3e
+          git -C fds worktree add --detach ../original 68d163c5679e5b4e46e70b68171379f2db2b8ebc
+          git -C fds worktree add --detach ../timers 80dba73566503571dda919b6c04ef85299d16ca3
+          git -C fds worktree add --detach ../angles 58732c4431ee90469f32685c444ce3c144517f3e
       - run: sudo apt-get update && sudo apt-get install -y gfortran gcc g++ make cmake libopenmpi-dev openmpi-bin
       - uses: marcfehling/setup-oneapi@v0
         with:
