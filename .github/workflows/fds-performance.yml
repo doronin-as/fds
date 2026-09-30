@@ -1,0 +1,75 @@
+name: FDS performance baseline
+on:
+  push:
+    branches: [codex/fds-performance]
+    paths: [.github/workflows/fds-performance.yml, Source/**]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      OMP_NUM_THREADS: "1"
+      OMP_DYNAMIC: "FALSE"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: fds
+          persist-credentials: false
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gfortran gcc g++ make cmake libopenmpi-dev openmpi-bin
+      - uses: marcfehling/setup-oneapi@v0
+        with:
+          components: |
+            mkl@2025.1.0
+          prune: false
+      - name: Record environment
+        run: |
+          mkdir -p results
+          { uname -a; lscpu; gfortran --version; mpirun --version; cmake --version; git -C fds rev-parse HEAD; git -C fds diff; } > results/environment.txt
+          sha256sum fds/Verification/NS_Analytical_Solution/ns2d_16.fds fds/Verification/Pressure_Solver/dancing_eddies_default.fds > results/inputs.sha256
+      - name: Build unchanged FDS with dependencies
+        shell: bash
+        run: |
+          source /opt/intel/oneapi/setvars.sh
+          export FIREMODELS="$GITHUB_WORKSPACE"
+          cd fds/Build/ompi_gnu_linux
+          set -o pipefail
+          ./make_fds.sh 2>&1 | tee "$GITHUB_WORKSPACE/results/build.log"
+          test -x fds_ompi_gnu_linux
+      - name: Run Verification sample with repeated measurements
+        shell: bash
+        run: |
+          source /opt/intel/oneapi/setvars.sh
+          exe="$GITHUB_WORKSPACE/fds/Build/ompi_gnu_linux/fds_ompi_gnu_linux"
+          printf 'case,ranks,repeat,seconds,exit_code\n' > results/timings.csv
+          for spec in NS_Analytical_Solution/ns2d_16.fds:1 Pressure_Solver/dancing_eddies_default.fds:1 Pressure_Solver/dancing_eddies_default.fds:2; do
+            input="${spec%:*}"
+            ranks="${spec##*:}"
+            case_name="$(basename "$input" .fds)"
+            for repeat in 0 1 2 3; do
+              dir="$GITHUB_WORKSPACE/results/${case_name}_p${ranks}_r${repeat}"
+              mkdir -p "$dir"
+              cp "$GITHUB_WORKSPACE/fds/Verification/$input" "$dir/"
+              cd "$dir"
+              set +e
+              /usr/bin/time -f '%e' -o wall_seconds.txt timeout 600 mpirun --oversubscribe -np "$ranks" "$exe" "$(basename "$input")" > console.log 2>&1
+              code=$?
+              set -e
+              seconds="$(tail -n 1 wall_seconds.txt)"
+              printf '%s,%s,%s,%s,%s\n' "$case_name" "$ranks" "$repeat" "$seconds" "$code" >> "$GITHUB_WORKSPACE/results/timings.csv"
+              test "$code" -eq 0
+              grep -q 'STOP: FDS completed successfully' console.log
+              cd "$GITHUB_WORKSPACE"
+            done
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fds-baseline-results
+          path: results/
+          retention-days: 14
