@@ -4009,15 +4009,15 @@ CHARACTER(LEN=LINE_LENGTH) :: LINE
 CHARACTER(LEN=LINE_LENGTH), DIMENSION(0:N_MPI_PROCESSES-1) :: LINE_ARRAY
 CHARACTER(30) :: FRMT
 
-! T_USED(12) (PACK) is a subset of T_USED(11) (COMM). Separate them.
+! T_USED(12) (PACK) is a subset of T_USED(11) (COMM). Separate them only in the output copy.
 
-T_USED(11) = T_USED(11) - T_USED(12)
+T_USED_COPY(2:N_TIMERS) = T_USED(2:N_TIMERS)
+T_USED_COPY(11) = T_USED_COPY(11) - T_USED_COPY(12)
 
 ! T_USED_COPY(1) is the time spent in the main routine; i.e. the time not spent in a subroutine.
-! T_USED_COPY so not overwriting T_USED(1) when multiple CPU dumps happen.
+! Preserve the accumulated timers when multiple CPU dumps happen.
 
-T_USED_COPY(1) = CURRENT_TIME() - T_USED(1) - SUM(T_USED(2:N_TIMERS))
-T_USED_COPY(2:N_TIMERS) = T_USED(2:N_TIMERS)
+T_USED_COPY(1) = CURRENT_TIME() - T_USED(1) - SUM(T_USED_COPY(2:N_TIMERS))
 WRITE(FRMT,'(A,I2.2,A)') '(I5,',N_TIMERS+1,'(",",ES10.3))'
 WRITE(LINE,FRMT) MY_RANK,(T_USED_COPY(I),I=1,N_TIMERS),SUM(T_USED_COPY(1:N_TIMERS))
 

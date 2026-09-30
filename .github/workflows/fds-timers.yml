@@ -1,0 +1,34 @@
+name: FDS timer regression
+on:
+  push:
+    branches: [codex/fds-timers]
+    paths: [Source/main.f90, Utilities/Scripts/test_dump_timers.py, .github/workflows/fds-timers.yml]
+permissions:
+  contents: read
+jobs:
+  repeated-dumps:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install GNU Fortran and Open MPI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gfortran libopenmpi-dev openmpi-bin
+      - name: Verify repeated dumps on one and two MPI ranks
+        run: python3 Utilities/Scripts/test_dump_timers.py
+      - name: Verify regression test rejects the original routine
+        run: |
+          git fetch --depth 1 origin 68d163c5679e5b4e46e70b68171379f2db2b8ebc
+          git show 68d163c5679e5b4e46e70b68171379f2db2b8ebc:Source/main.f90 > /tmp/original-main.f90
+          python3 Utilities/Scripts/test_dump_timers.py --source /tmp/original-main.f90 --emit-source /tmp/original-test.f90
+          mpifort -O0 -fcheck=all /tmp/original-test.f90 -o /tmp/original-test
+          if timeout 60 mpirun -np 1 /tmp/original-test; then
+            echo 'ERROR: regression test accepted the original bug'
+            exit 1
+          else
+            code=$?
+            test "$code" -eq 1
+          fi
